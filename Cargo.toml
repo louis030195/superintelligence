@@ -1,8 +1,18 @@
 [package]
-name = "scrape-cidre"
+name = "mac-automator"
 version = "0.1.0"
 edition = "2021"
-description = "macOS accessibility-based scraping automation"
+description = "macOS automation library using cidre accessibility APIs"
+repository = "https://github.com/louis030195/scrape-cidre"
+license = "MIT"
+
+[lib]
+name = "mac_automator"
+path = "src/lib.rs"
+
+[[bin]]
+name = "discord-scraper"
+path = "src/bin/discord.rs"
 
 [dependencies]
 cidre = { version = "0.12", features = ["ax"] }
