@@ -29,10 +29,6 @@ keywords = ["automation", "macos", "accessibility", "ai", "agents"]
 name = "bigbrother_core"
 path = "src/lib.rs"
 
-[[bin]]
-name = "bbc"
-path = "src/bin/cli.rs"
-
 [dependencies]
 cidre.workspace = true
 serde.workspace = true

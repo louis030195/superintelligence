@@ -16,6 +16,7 @@ name = "bb"
 path = "src/bin/cli.rs"
 
 [dependencies]
+bigbrother-core = { path = "../.." }
 cidre.workspace = true
 serde.workspace = true
 serde_json.workspace = true

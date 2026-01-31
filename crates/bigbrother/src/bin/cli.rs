@@ -1,15 +1,23 @@
-//! BigBrother CLI
+//! bb - BigBrother CLI
+//!
+//! macOS desktop automation and workflow recording for AI agents.
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
 use bigbrother::prelude::*;
+use bigbrother_core::prelude::*;
+use bigbrother_core::input;
+use bigbrother_core::error::{Error, ErrorCode};
 
 #[derive(Parser)]
 #[command(name = "bb")]
-#[command(about = "BigBrother - macOS Workflow Recorder")]
+#[command(about = "BigBrother - macOS desktop automation and workflow recording")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -17,7 +25,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start recording
+    // === Recording Commands ===
+    /// Start recording user interactions
     Record {
         /// Workflow name
         #[arg(short, long, default_value = "workflow")]
@@ -32,7 +41,7 @@ enum Commands {
         threshold: f64,
     },
 
-    /// Replay a workflow
+    /// Replay a recorded workflow
     Replay {
         /// Workflow file
         file: String,
@@ -61,40 +70,411 @@ enum Commands {
         file: String,
     },
 
-    /// Check permissions
+    /// Check/request permissions
     Permissions {
         /// Request if not granted
         #[arg(long)]
         request: bool,
     },
+
+    // === Automation Commands ===
+    /// List running applications
+    Apps,
+
+    /// Find a browser
+    Browser,
+
+    /// Get accessibility tree for an app
+    Tree {
+        /// Application name
+        #[arg(long)]
+        app: String,
+
+        /// Maximum tree depth
+        #[arg(long, default_value = "15")]
+        depth: usize,
+    },
+
+    /// Find elements matching selector
+    Find {
+        /// Selector (e.g., "role:Button AND name:Submit")
+        selector: String,
+
+        /// Application name
+        #[arg(long)]
+        app: Option<String>,
+
+        /// Timeout in milliseconds
+        #[arg(long, default_value = "5000")]
+        timeout: u64,
+    },
+
+    /// Click an element
+    Click {
+        /// Selector or index (e.g., "role:Button" or "index:42")
+        selector: String,
+
+        /// Application name
+        #[arg(long)]
+        app: Option<String>,
+    },
+
+    /// Type text (optionally into a specific element)
+    Type {
+        /// Text to type
+        text: String,
+
+        /// Selector to focus first
+        #[arg(long)]
+        selector: Option<String>,
+
+        /// Application name
+        #[arg(long)]
+        app: Option<String>,
+    },
+
+    /// Scroll up or down
+    Scroll {
+        /// Direction: up or down
+        #[arg(long, default_value = "down")]
+        direction: String,
+
+        /// Number of pages
+        #[arg(long, default_value = "1")]
+        pages: u32,
+
+        /// Application to activate first
+        #[arg(long)]
+        app: Option<String>,
+    },
+
+    /// Press a key
+    Press {
+        /// Key name (PageUp, PageDown, Return, Tab, Escape, etc.)
+        key: String,
+
+        /// Repeat count
+        #[arg(long, default_value = "1")]
+        repeat: u32,
+
+        /// Delay between presses in ms
+        #[arg(long, default_value = "100")]
+        delay: u64,
+    },
+
+    /// Open a URL
+    Open {
+        /// URL to open
+        url: String,
+    },
+
+    /// Wait for idle or element
+    Wait {
+        /// Milliseconds to wait
+        #[arg(long)]
+        idle: Option<u64>,
+
+        /// Selector to wait for
+        #[arg(long)]
+        selector: Option<String>,
+
+        /// Timeout for selector wait
+        #[arg(long, default_value = "10000")]
+        timeout: u64,
+    },
+
+    /// Scrape text from an app
+    Scrape {
+        /// Application name
+        #[arg(long)]
+        app: String,
+
+        /// Maximum depth
+        #[arg(long, default_value = "20")]
+        depth: usize,
+    },
+
+    /// Keyboard shortcut (e.g., cmd+c)
+    Shortcut {
+        /// Key (e.g., "c" for cmd+c)
+        key: String,
+
+        /// Modifier: cmd, ctrl, alt, shift
+        #[arg(long, default_value = "cmd")]
+        modifier: String,
+    },
+
+    /// Activate (focus) an application
+    Activate {
+        /// Application name
+        app: String,
+    },
 }
 
-fn main() -> Result<()> {
-    let cli = Cli::parse();
+#[derive(Serialize)]
+struct Output<T: Serialize> {
+    success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<Error>,
+}
 
-    match cli.command {
-        Commands::Record { name, no_context, threshold } => {
-            record(&name, !no_context, threshold)?;
-        }
-        Commands::Replay { file, speed } => {
-            replay(&file, speed)?;
-        }
-        Commands::List => {
-            list()?;
-        }
-        Commands::Show { file, all } => {
-            show(&file, all)?;
-        }
-        Commands::Delete { file } => {
-            delete(&file)?;
-        }
-        Commands::Permissions { request } => {
-            permissions(request)?;
+impl<T: Serialize> Output<T> {
+    fn ok(data: T) -> Self {
+        Self {
+            success: true,
+            data: Some(data),
+            error: None,
         }
     }
 
-    Ok(())
+    fn err(e: Error) -> Output<()> {
+        Output {
+            success: false,
+            data: None,
+            error: Some(e),
+        }
+    }
 }
+
+fn print_json<T: Serialize>(output: &T) {
+    println!("{}", serde_json::to_string_pretty(output).unwrap());
+}
+
+fn key_name_to_code(name: &str) -> Option<u8> {
+    match name.to_lowercase().as_str() {
+        "pageup" | "page_up" => Some(input::key_codes::PAGE_UP),
+        "pagedown" | "page_down" => Some(input::key_codes::PAGE_DOWN),
+        "return" | "enter" => Some(input::key_codes::RETURN),
+        "tab" => Some(input::key_codes::TAB),
+        "escape" | "esc" => Some(input::key_codes::ESCAPE),
+        "space" => Some(input::key_codes::SPACE),
+        "delete" | "backspace" => Some(input::key_codes::DELETE),
+        "up" | "arrow_up" => Some(input::key_codes::ARROW_UP),
+        "down" | "arrow_down" => Some(input::key_codes::ARROW_DOWN),
+        "left" | "arrow_left" => Some(input::key_codes::ARROW_LEFT),
+        "right" | "arrow_right" => Some(input::key_codes::ARROW_RIGHT),
+        "home" => Some(input::key_codes::HOME),
+        "end" => Some(input::key_codes::END),
+        _ => None,
+    }
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    let result: Result<(), anyhow::Error> = match cli.command {
+        // === Recording Commands ===
+        Commands::Record { name, no_context, threshold } => {
+            record(&name, !no_context, threshold)
+        }
+        Commands::Replay { file, speed } => {
+            replay(&file, speed)
+        }
+        Commands::List => {
+            list()
+        }
+        Commands::Show { file, all } => {
+            show(&file, all)
+        }
+        Commands::Delete { file } => {
+            delete(&file)
+        }
+        Commands::Permissions { request } => {
+            permissions(request)
+        }
+
+        // === Automation Commands ===
+        Commands::Apps => {
+            run_automation(|| {
+                let desktop = Desktop::new()?;
+                let apps = desktop.apps()?;
+                print_json(&Output::ok(apps));
+                Ok(())
+            })
+        }
+        Commands::Browser => {
+            run_automation(|| {
+                let desktop = Desktop::new()?;
+                let browser = desktop.browser()?;
+                print_json(&Output::ok(browser));
+                Ok(())
+            })
+        }
+        Commands::Tree { app, depth } => {
+            run_automation(|| {
+                let mut desktop = Desktop::new()?;
+                let tree = desktop.tree(&app, depth)?;
+                print_json(&Output::ok(tree));
+                Ok(())
+            })
+        }
+        Commands::Find { selector, app, timeout } => {
+            run_automation(|| {
+                let desktop = Desktop::new()?;
+                let desktop = match app {
+                    Some(ref a) => desktop.in_app(a),
+                    None => desktop,
+                };
+                let loc = desktop.locator(&selector)?.timeout(timeout);
+                let elements = loc.find_all()?;
+                let infos: Vec<_> = elements.iter().map(|e| e.info()).collect();
+                print_json(&Output::ok(infos));
+                Ok(())
+            })
+        }
+        Commands::Click { selector, app } => {
+            run_automation(|| {
+                let desktop = Desktop::new()?;
+                let desktop = match app {
+                    Some(ref a) => desktop.in_app(a),
+                    None => desktop,
+                };
+                let result = desktop.locator(&selector)?.click()?;
+                print_json(&Output::ok(result));
+                Ok(())
+            })
+        }
+        Commands::Type { text, selector, app } => {
+            run_automation(|| {
+                let desktop = Desktop::new()?;
+                if let Some(sel) = selector {
+                    let desktop = match app {
+                        Some(ref a) => desktop.in_app(a),
+                        None => desktop,
+                    };
+                    let result = desktop.locator(&sel)?.type_text(&text)?;
+                    print_json(&Output::ok(result));
+                } else {
+                    desktop.type_text(&text)?;
+                    print_json(&Output::ok(serde_json::json!({"typed": text})));
+                }
+                Ok(())
+            })
+        }
+        Commands::Scroll { direction, pages, app } => {
+            run_automation(|| {
+                let desktop = Desktop::new()?;
+                if let Some(ref a) = app {
+                    desktop.activate(a)?;
+                    desktop.wait_idle(300)?;
+                }
+                match direction.to_lowercase().as_str() {
+                    "up" => desktop.scroll_up(pages)?,
+                    "down" => desktop.scroll_down(pages)?,
+                    _ => {
+                        return Err(Error::new(
+                            ErrorCode::Unknown,
+                            format!("Unknown direction: {}", direction),
+                        ).into())
+                    }
+                }
+                print_json(&Output::ok(serde_json::json!({
+                    "direction": direction,
+                    "pages": pages
+                })));
+                Ok(())
+            })
+        }
+        Commands::Press { key, repeat, delay } => {
+            run_automation(|| {
+                let code = key_name_to_code(&key).ok_or_else(|| {
+                    Error::new(ErrorCode::Unknown, format!("Unknown key: {}", key))
+                })?;
+                for i in 0..repeat {
+                    input::press_key(code).map_err(Error::from)?;
+                    if i < repeat - 1 {
+                        std::thread::sleep(std::time::Duration::from_millis(delay));
+                    }
+                }
+                print_json(&Output::ok(serde_json::json!({
+                    "key": key,
+                    "repeat": repeat
+                })));
+                Ok(())
+            })
+        }
+        Commands::Open { url } => {
+            run_automation(|| {
+                let desktop = Desktop::new()?;
+                desktop.open_url(&url)?;
+                print_json(&Output::ok(serde_json::json!({"opened": url})));
+                Ok(())
+            })
+        }
+        Commands::Wait { idle, selector, timeout } => {
+            run_automation(|| {
+                let desktop = Desktop::new()?;
+                if let Some(ms) = idle {
+                    desktop.wait_idle(ms)?;
+                    print_json(&Output::ok(serde_json::json!({"waited_ms": ms})));
+                } else if let Some(sel) = selector {
+                    let element = desktop.locator(&sel)?.timeout(timeout).wait()?;
+                    print_json(&Output::ok(element.info()));
+                } else {
+                    print_json(&Output::ok(serde_json::json!({"waited_ms": 0})));
+                }
+                Ok(())
+            })
+        }
+        Commands::Scrape { app, depth } => {
+            run_automation(|| {
+                let desktop = Desktop::new()?;
+                let result = desktop.scrape(&app, depth)?;
+                print_json(&Output::ok(result));
+                Ok(())
+            })
+        }
+        Commands::Shortcut { key, modifier } => {
+            run_automation(|| {
+                let mods: Vec<&str> = match modifier.to_lowercase().as_str() {
+                    "cmd" | "command" => vec!["command"],
+                    "ctrl" | "control" => vec!["control"],
+                    "alt" | "option" => vec!["option"],
+                    "shift" => vec!["shift"],
+                    _ => vec!["command"],
+                };
+                input::shortcut(&key, &mods).map_err(Error::from)?;
+                print_json(&Output::ok(serde_json::json!({
+                    "key": key,
+                    "modifier": modifier
+                })));
+                Ok(())
+            })
+        }
+        Commands::Activate { app } => {
+            run_automation(|| {
+                let desktop = Desktop::new()?;
+                desktop.activate(&app)?;
+                print_json(&Output::ok(serde_json::json!({"activated": app})));
+                Ok(())
+            })
+        }
+    };
+
+    if let Err(e) = result {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn run_automation<F>(f: F) -> Result<(), anyhow::Error>
+where
+    F: FnOnce() -> Result<(), anyhow::Error>,
+{
+    match f() {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            if let Some(err) = e.downcast_ref::<Error>() {
+                print_json(&Output::<()>::err(err.clone()));
+            }
+            Err(e)
+        }
+    }
+}
+
+// === Recording Functions ===
 
 fn record(name: &str, capture_context: bool, threshold: f64) -> Result<()> {
     let config = RecorderConfig {
@@ -105,7 +485,6 @@ fn record(name: &str, capture_context: bool, threshold: f64) -> Result<()> {
 
     let recorder = WorkflowRecorder::with_config(config);
 
-    // Check permissions
     let perms = recorder.check_permissions();
     if !perms.accessibility {
         eprintln!("Accessibility permission required.");
@@ -122,14 +501,12 @@ fn record(name: &str, capture_context: bool, threshold: f64) -> Result<()> {
 
     let (mut workflow, handle) = recorder.start(name)?;
 
-    // Ctrl+C handler
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
     ctrlc::set_handler(move || {
         r.store(false, Ordering::SeqCst);
     })?;
 
-    // Progress display
     let mut count = 0;
     while running.load(Ordering::SeqCst) && handle.is_running() {
         handle.drain(&mut workflow);
@@ -144,7 +521,6 @@ fn record(name: &str, capture_context: bool, threshold: f64) -> Result<()> {
     handle.stop(&mut workflow);
     println!("\n{} events recorded", workflow.events.len());
 
-    // Save
     let storage = WorkflowStorage::new()?;
     let path = storage.save(&workflow)?;
     println!("Saved: {}", path.display());
@@ -190,7 +566,6 @@ fn show(file: &str, all: bool) -> Result<()> {
     println!("Name: {}", workflow.name);
     println!("Events: {}", workflow.events.len());
 
-    // Count event types
     let mut clicks = 0;
     let mut moves = 0;
     let mut scrolls = 0;
@@ -202,15 +577,15 @@ fn show(file: &str, all: bool) -> Result<()> {
 
     for e in &workflow.events {
         match &e.data {
-            EventData::Click { .. } => clicks += 1,
-            EventData::Move { .. } => moves += 1,
-            EventData::Scroll { .. } => scrolls += 1,
-            EventData::Key { .. } => keys += 1,
-            EventData::Text { .. } => text += 1,
-            EventData::App { .. } => apps += 1,
-            EventData::Window { .. } => windows += 1,
-            EventData::Paste { .. } => pastes += 1,
-            EventData::Context { .. } => {}
+            bigbrother::EventData::Click { .. } => clicks += 1,
+            bigbrother::EventData::Move { .. } => moves += 1,
+            bigbrother::EventData::Scroll { .. } => scrolls += 1,
+            bigbrother::EventData::Key { .. } => keys += 1,
+            bigbrother::EventData::Text { .. } => text += 1,
+            bigbrother::EventData::App { .. } => apps += 1,
+            bigbrother::EventData::Window { .. } => windows += 1,
+            bigbrother::EventData::Paste { .. } => pastes += 1,
+            bigbrother::EventData::Context { .. } => {}
         }
     }
 

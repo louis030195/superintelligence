@@ -1,15 +1,14 @@
 # bigbrother
 
-High-performance macOS workflow recorder using CGEventTap and Accessibility APIs.
+macOS desktop automation and workflow recording for AI agents.
 
 ## Features
 
-- **Efficient**: 2 lightweight threads - event tap + app/window observer
-- **Complete capture**: Clicks, mouse moves, scrolls, keyboard, app/window switches, clipboard
-- **Smart clipboard**: Detects Cmd+C/X/V instead of polling
-- **AI-friendly output**: Compact JSON lines format with minimal fields
+- **Recording**: Capture clicks, mouse moves, scrolls, keyboard, app/window switches, clipboard
 - **Replay**: Full playback using CGEventPost
-- **Context capture**: UI element info at click positions (optional)
+- **Automation**: Click, type, scroll, find elements, scrape text
+- **AI-friendly**: Compact JSON output, structured for LLM consumption
+- **Efficient**: 2 lightweight threads, smart clipboard detection via Cmd+C/X/V
 - **Streaming API**: Consume events in real-time from other crates
 
 ## Requirements
@@ -24,31 +23,30 @@ High-performance macOS workflow recorder using CGEventTap and Accessibility APIs
 # Check permissions
 bb permissions
 
-# Record (Ctrl+C to stop)
-bb record -n my-workflow
+# === Recording ===
+bb record -n my-workflow     # Record (Ctrl+C to stop)
+bb list                      # List recordings
+bb show workflow.jsonl       # Show recording info
+bb replay workflow.jsonl     # Replay at 1x speed
+bb replay workflow.jsonl -s 2.0  # Replay at 2x speed
 
-# Record without element context (faster)
-bb record -n fast --no-context
-
-# List recordings
-bb list
-
-# Show recording info
-bb show my-workflow_20240101_120000.jsonl
-
-# Replay at 2x speed
-bb replay my-workflow_20240101_120000.jsonl -s 2.0
-
-# Delete
-bb delete my-workflow_20240101_120000.jsonl
+# === Automation ===
+bb apps                      # List running apps
+bb activate Safari           # Focus an app
+bb tree --app Safari         # Get accessibility tree
+bb find "role:Button" --app Safari  # Find elements
+bb click "role:Button AND name:Submit" --app Safari
+bb type "hello world"        # Type text
+bb scroll --direction down --pages 2
+bb press return              # Press a key
+bb shortcut c --modifier cmd # Cmd+C
+bb open "https://example.com"
+bb scrape --app Safari       # Extract text
 ```
 
 ## Output Format
 
-Events are stored as JSON lines (`.jsonl`). Each event has:
-- `t`: timestamp in ms since start
-- `e`: event type
-- Type-specific fields
+Events are stored as JSON lines (`.jsonl`):
 
 ```json
 {"t":100,"e":"c","x":500,"y":300,"b":0,"n":1,"m":0}
@@ -77,55 +75,31 @@ Event types:
 ```rust
 use bigbrother::prelude::*;
 
-// Record to workflow
+// Record
 let recorder = WorkflowRecorder::new();
 let (mut workflow, handle) = recorder.start("demo")?;
-
-// ... wait for user actions ...
-
-handle.drain(&mut workflow);
+// ... user actions ...
 handle.stop(&mut workflow);
 
-// Save
+// Save & Load
 let storage = WorkflowStorage::new()?;
 storage.save(&workflow)?;
+let workflow = storage.load("demo.jsonl")?;
 
 // Replay
-let workflow = storage.load("demo_20240101.jsonl")?;
-let replayer = Replayer::new().speed(2.0);
-replayer.play(&workflow)?;
-```
+Replayer::new().speed(2.0).play(&workflow)?;
 
-## Streaming API
-
-Consume events in real-time from other crates:
-
-```rust
-use bigbrother::prelude::*;
-
-let recorder = WorkflowRecorder::new();
+// Stream events
 let stream = recorder.stream()?;
-
-// As iterator
 for event in stream {
     println!("{:?}", event);
-}
-
-// Or via receiver for crossbeam select!
-let stream = recorder.stream()?;
-let rx = stream.receiver();
-loop {
-    match rx.recv_timeout(Duration::from_secs(1)) {
-        Ok(event) => println!("{:?}", event),
-        Err(_) => break,
-    }
 }
 ```
 
 ## Architecture
 
 Two parallel threads:
-1. **Event Tap** (CGEventTap): Mouse/keyboard/clipboard capture via CFRunLoop
-2. **App Observer**: Polls frontmost app every 100ms for app/window changes
+1. **Event Tap** (CGEventTap): Mouse/keyboard/clipboard capture
+2. **App Observer**: Polls frontmost app every 100ms
 
 Events flow through a lock-free crossbeam channel.
