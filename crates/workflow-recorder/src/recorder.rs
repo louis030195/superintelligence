@@ -4,7 +4,8 @@
 
 use crate::events::*;
 use anyhow::Result;
-use crossbeam_channel::{bounded, Receiver, Sender};
+pub use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::bounded;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -43,7 +44,7 @@ impl Default for RecorderConfig {
     }
 }
 
-/// Recording handle
+/// Recording handle - owns the recording session
 pub struct RecordingHandle {
     stop: Arc<AtomicBool>,
     events_rx: Receiver<Event>,
@@ -70,6 +71,80 @@ impl RecordingHandle {
 
     pub fn is_running(&self) -> bool {
         !self.stop.load(Ordering::Relaxed)
+    }
+
+    /// Get the event receiver for streaming consumption
+    /// Use this to process events in real-time from another thread/crate
+    pub fn receiver(&self) -> &Receiver<Event> {
+        &self.events_rx
+    }
+
+    /// Try to receive an event without blocking
+    pub fn try_recv(&self) -> Option<Event> {
+        self.events_rx.try_recv().ok()
+    }
+
+    /// Receive an event, blocking until one is available
+    pub fn recv(&self) -> Option<Event> {
+        self.events_rx.recv().ok()
+    }
+
+    /// Receive with timeout
+    pub fn recv_timeout(&self, timeout: std::time::Duration) -> Option<Event> {
+        self.events_rx.recv_timeout(timeout).ok()
+    }
+}
+
+/// Streaming event source - for consumers who just want events
+pub struct EventStream {
+    stop: Arc<AtomicBool>,
+    events_rx: Receiver<Event>,
+    threads: Vec<thread::JoinHandle<()>>,
+}
+
+impl EventStream {
+    /// Stop the event stream
+    pub fn stop(self) {
+        self.stop.store(true, Ordering::SeqCst);
+        for t in self.threads {
+            let _ = t.join();
+        }
+    }
+
+    /// Check if stream is still running
+    pub fn is_running(&self) -> bool {
+        !self.stop.load(Ordering::Relaxed)
+    }
+
+    /// Get the underlying receiver (for select! etc)
+    pub fn receiver(&self) -> &Receiver<Event> {
+        &self.events_rx
+    }
+
+    /// Try receive without blocking
+    pub fn try_recv(&self) -> Option<Event> {
+        self.events_rx.try_recv().ok()
+    }
+
+    /// Blocking receive
+    pub fn recv(&self) -> Option<Event> {
+        self.events_rx.recv().ok()
+    }
+
+    /// Receive with timeout
+    pub fn recv_timeout(&self, timeout: std::time::Duration) -> Option<Event> {
+        self.events_rx.recv_timeout(timeout).ok()
+    }
+}
+
+impl Iterator for EventStream {
+    type Item = Event;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stop.load(Ordering::Relaxed) {
+            return None;
+        }
+        self.events_rx.recv().ok()
     }
 }
 
@@ -116,6 +191,30 @@ impl WorkflowRecorder {
 
     pub fn start(&self, name: impl Into<String>) -> Result<(RecordedWorkflow, RecordingHandle)> {
         let workflow = RecordedWorkflow::new(name);
+        let (tx, rx) = self.start_capture()?;
+
+        let handle = RecordingHandle {
+            stop: tx.1,
+            events_rx: rx,
+            threads: tx.0,
+        };
+
+        Ok((workflow, handle))
+    }
+
+    /// Start streaming events without workflow management
+    /// Use this when you want to consume events from another crate
+    pub fn stream(&self) -> Result<EventStream> {
+        let (internals, rx) = self.start_capture()?;
+
+        Ok(EventStream {
+            stop: internals.1,
+            events_rx: rx,
+            threads: internals.0,
+        })
+    }
+
+    fn start_capture(&self) -> Result<((Vec<thread::JoinHandle<()>>, Arc<AtomicBool>), Receiver<Event>)> {
         let (tx, rx) = bounded::<Event>(self.config.max_buffer);
         let stop = Arc::new(AtomicBool::new(false));
         let start_time = Instant::now();
@@ -130,20 +229,14 @@ impl WorkflowRecorder {
             run_event_tap(tx1, stop1, start_time, config1);
         }));
 
-        // Thread 2: App switch notifications
+        // Thread 2: App/window switch notifications
         let tx2 = tx.clone();
         let stop2 = stop.clone();
         threads.push(thread::spawn(move || {
             run_app_observer(tx2, stop2, start_time);
         }));
 
-        let handle = RecordingHandle {
-            stop,
-            events_rx: rx,
-            threads,
-        };
-
-        Ok((workflow, handle))
+        Ok(((threads, stop), rx))
     }
 }
 
@@ -526,9 +619,20 @@ fn run_app_observer(tx: Sender<Event>, stop: Arc<AtomicBool>, start: Instant) {
                         .unwrap_or_else(|| "?".to_string());
                     let pid = app.pid();
 
+                    // Send app event
                     let _ = tx_clone.try_send(Event {
                         t: start_clone.elapsed().as_millis() as u64,
-                        data: EventData::App { n: name, p: pid },
+                        data: EventData::App { n: name.clone(), p: pid },
+                    });
+
+                    // Query focused window title via accessibility
+                    let window_title = get_focused_window_title(pid);
+                    let _ = tx_clone.try_send(Event {
+                        t: start_clone.elapsed().as_millis() as u64,
+                        data: EventData::Window {
+                            a: name,
+                            w: window_title.map(|s| truncate(&s, 100)),
+                        },
                     });
                 }
             }
@@ -539,6 +643,24 @@ fn run_app_observer(tx: Sender<Event>, stop: Arc<AtomicBool>, start: Instant) {
     let _rl = cf::RunLoop::current();
     while !stop.load(Ordering::Relaxed) {
         cf::RunLoop::run_in_mode(cf::RunLoopMode::default(), 0.1, true);
+    }
+}
+
+/// Get the focused window title for a given app PID
+fn get_focused_window_title(pid: i32) -> Option<String> {
+    use cidre::ax;
+
+    let app = ax::UiElement::with_app_pid(pid);
+
+    // Get focused window via attribute
+    let focused_window_val = app.attr_value(ax::attr::focused_window()).ok()?;
+
+    // Cast to UiElement
+    if focused_window_val.get_type_id() == ax::UiElement::type_id() {
+        let focused_window: &ax::UiElement = unsafe { std::mem::transmute(&*focused_window_val) };
+        get_str_attr(focused_window, ax::attr::title())
+    } else {
+        None
     }
 }
 

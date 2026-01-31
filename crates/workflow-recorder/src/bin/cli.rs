@@ -197,6 +197,7 @@ fn show(file: &str, all: bool) -> Result<()> {
     let mut keys = 0;
     let mut text = 0;
     let mut apps = 0;
+    let mut windows = 0;
     let mut pastes = 0;
 
     for e in &workflow.events {
@@ -207,6 +208,7 @@ fn show(file: &str, all: bool) -> Result<()> {
             EventData::Key { .. } => keys += 1,
             EventData::Text { .. } => text += 1,
             EventData::App { .. } => apps += 1,
+            EventData::Window { .. } => windows += 1,
             EventData::Paste { .. } => pastes += 1,
             EventData::Context { .. } => {}
         }
@@ -219,6 +221,7 @@ fn show(file: &str, all: bool) -> Result<()> {
     println!("  Keys: {}", keys);
     println!("  Text inputs: {}", text);
     println!("  App switches: {}", apps);
+    println!("  Window switches: {}", windows);
     println!("  Clipboard: {}", pastes);
 
     if all {

@@ -58,6 +58,14 @@ pub enum EventData {
     #[serde(rename = "a")]
     App { n: String, p: i32 },
 
+    /// Window focused: app name, window title
+    #[serde(rename = "w")]
+    Window {
+        a: String, // app name
+        #[serde(skip_serializing_if = "Option::is_none")]
+        w: Option<String>, // window title
+    },
+
     /// Clipboard changed: operation (c=copy, x=cut, v=paste), content preview
     #[serde(rename = "p")]
     Paste { o: char, s: String },
