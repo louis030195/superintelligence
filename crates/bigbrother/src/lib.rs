@@ -1,21 +1,60 @@
-//! macOS Workflow Recorder
+//! # BIGBROTHER
 //!
-//! Efficient recording of user interactions with UI element context.
-//! Optimized for AI consumption.
+//! The sensory cortex of the coming superintelligence.
+//!
+//! Desktop automation and workflow recording for AI agents.
+//!
+//! ## Features
+//!
+//! - **Recording**: Capture all user interactions
+//! - **Replay**: Temporal manipulation of recorded workflows
+//! - **Automation**: Direct control of the desktop
+//! - **Cross-platform**: macOS now, Linux/Windows coming
+//!
+//! ## Quick Start
+//!
+//! ```rust,no_run
+//! use bigbrother::prelude::*;
+//!
+//! // Automation (macOS only for now)
+//! let desktop = Desktop::new()?;
+//! desktop.locator("role:Button")?.click()?;
+//!
+//! // Recording (macOS only for now)
+//! let recorder = WorkflowRecorder::new();
+//! let stream = recorder.stream()?;
+//! for event in stream {
+//!     println!("{:?}", event);
+//! }
+//! # Ok::<(), anyhow::Error>(())
+//! ```
 
-pub mod events;
-pub mod recorder;
-pub mod replay;
-pub mod storage;
+// Re-export core automation
+pub use bigbrother_core::*;
 
-pub use events::*;
-pub use recorder::{WorkflowRecorder, RecorderConfig, PermissionStatus, RecordingHandle, EventStream, Receiver, Sender};
-pub use replay::Replayer;
-pub use storage::WorkflowStorage;
+// Re-export recorder module
+pub use bigbrother_recorder as recorder;
 
+// Re-export common types (cross-platform)
+pub use bigbrother_recorder::{Event, EventData, Modifiers, RecordedWorkflow, WorkflowStorage};
+
+// Re-export platform-specific types
+#[cfg(target_os = "macos")]
+pub use bigbrother_recorder::{
+    EventStream, RecorderConfig, RecordingHandle, Replayer, WorkflowRecorder,
+};
+
+/// Prelude - import everything you need
 pub mod prelude {
-    pub use crate::events::*;
-    pub use crate::recorder::{WorkflowRecorder, RecorderConfig, PermissionStatus, RecordingHandle, EventStream, Receiver, Sender};
-    pub use crate::replay::Replayer;
-    pub use crate::storage::WorkflowStorage;
+    // Core automation
+    pub use bigbrother_core::prelude::*;
+
+    // Recording - common types
+    pub use bigbrother_recorder::{Event, EventData, Modifiers, RecordedWorkflow, WorkflowStorage};
+
+    // Recording - platform-specific
+    #[cfg(target_os = "macos")]
+    pub use bigbrother_recorder::{
+        EventStream, RecorderConfig, RecordingHandle, Replayer, WorkflowRecorder,
+    };
 }

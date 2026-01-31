@@ -1,0 +1,19 @@
+[package]
+name = "bb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "BigBrother CLI - Desktop automation and workflow recording"
+
+[[bin]]
+name = "bb"
+path = "src/main.rs"
+
+[dependencies]
+bigbrother.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+serde.workspace = true
+serde_json.workspace = true

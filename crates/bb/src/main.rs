@@ -1,6 +1,9 @@
 //! bb - BigBrother CLI
 //!
-//! macOS desktop automation and workflow recording for AI agents.
+//! Cross-platform desktop automation and workflow recording for AI agents.
+//!
+//! Currently supported: macOS
+//! Coming soon: Linux, Windows
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -10,9 +13,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use bigbrother::prelude::*;
-use bigbrother_core::prelude::*;
-use bigbrother_core::input;
-use bigbrother_core::error::{Error, ErrorCode};
+use bigbrother::input;
+use bigbrother::error::{Error, ErrorCode};
 
 #[derive(Parser)]
 #[command(name = "bb")]

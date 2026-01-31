@@ -25,6 +25,7 @@ pub enum ErrorCode {
     ActionFailed,
     SelectorInvalid,
     MultipleMatches,
+    NotImplemented,
     Unknown,
 }
 

@@ -9,34 +9,24 @@ license = "MIT"
 repository = "https://github.com/louis030195/bigbrother"
 
 [workspace.dependencies]
-cidre = { version = "0.13", features = ["ax", "cg", "blocks", "ns", "app"] }
+# Internal crates
+bigbrother = { path = "crates/bigbrother" }
+bigbrother-core = { path = "crates/bigbrother-core" }
+bigbrother-recorder = { path = "crates/bigbrother-recorder" }
+
+# External dependencies
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+crossbeam-channel = "0.5"
+ctrlc = "3.4"
+libc = "0.2"
+parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
-chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
 
-[package]
-name = "bigbrother-core"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-description = "macOS desktop automation for AI agents. Deterministic Rust primitives with structured output for AI recovery."
-keywords = ["automation", "macos", "accessibility", "ai", "agents"]
-
-[lib]
-name = "bigbrother_core"
-path = "src/lib.rs"
-
-[dependencies]
-cidre.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-anyhow.workspace = true
-clap.workspace = true
-chrono.workspace = true
-
-[[example]]
-name = "discord_scrape"
-path = "examples/discord_scrape.rs"
+# Platform-specific
+[workspace.dependencies.cidre]
+version = "0.13"
+features = ["ax", "cg", "blocks", "ns", "app"]

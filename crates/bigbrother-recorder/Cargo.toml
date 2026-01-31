@@ -1,0 +1,23 @@
+[package]
+name = "bigbrother-recorder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cross-platform workflow recording and replay"
+keywords = ["automation", "recording", "workflow", "rpa"]
+
+[lib]
+name = "bigbrother_recorder"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cidre.workspace = true
+libc.workspace = true

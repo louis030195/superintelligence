@@ -1,0 +1,20 @@
+[package]
+name = "bigbrother-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cross-platform desktop automation for AI agents"
+keywords = ["automation", "desktop", "accessibility", "ai", "agents"]
+
+[lib]
+name = "bigbrother_core"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cidre.workspace = true
