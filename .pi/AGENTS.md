@@ -35,7 +35,7 @@ Use orchestration when:
 ## Building bb
 
 ```bash
-cd ~/Documents/superintelligence
+cd ~/Documents/bigbrother
 cargo build --release -p bb
 ```
 

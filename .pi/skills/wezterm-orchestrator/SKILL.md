@@ -57,4 +57,4 @@ done
 
 - Pane IDs are stable within a session
 - Use `bb wezterm list` to discover pane IDs
-- The `bb` binary is at `~/Documents/superintelligence/target/release/bb`
+- The `bb` binary is at `~/Documents/bigbrother/target/release/bb`

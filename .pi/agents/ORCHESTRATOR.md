@@ -50,8 +50,8 @@ tail -30 <session_file> | jq -r 'select(.type=="message") | "\(.message.role): \
 sleep 0.3
 
 # Type the task
-~/Documents/superintelligence/target/release/bb type "<task description>"
-~/Documents/superintelligence/target/release/bb press return
+~/Documents/bigbrother/target/release/bb type "<task description>"
+~/Documents/bigbrother/target/release/bb press return
 ```
 
 ### 4. Wait and check progress
