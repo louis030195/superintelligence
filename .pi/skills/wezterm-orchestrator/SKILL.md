@@ -1,60 +1,81 @@
 ---
 name: wezterm-orchestrator
-description: Control WezTerm panes - list panes, switch between them, and type commands into specific panes. Use when coordinating multiple terminal sessions or agents running in different panes.
+description: Control WezTerm panes - list panes, send commands to Pi agents, monitor their status. Use when coordinating multiple terminal sessions or coding agents.
 ---
 
 # WezTerm Orchestrator
 
-Control multiple WezTerm panes programmatically using `bb wezterm` commands.
+Control multiple WezTerm panes and Pi agents programmatically.
 
-## List all panes
+## List Panes
 
 ```bash
 bb wezterm list
 ```
 
-Returns JSON with pane_id, title, cwd, is_active for each pane.
-
-## Send text to a specific pane
-
+Quick summary:
 ```bash
-bb wezterm send <pane_id> "your text here"
+bb wezterm list | jq -r '.data[] | "\(.pane_id): \(.title) - \(.cwd | sub("file://"; ""))"'
 ```
 
-This activates the pane, types the text, and presses enter.
+## Send to a Pane
 
-Add `--no-enter` to skip pressing enter:
 ```bash
-bb wezterm send <pane_id> "partial text" --no-enter
+bb wezterm send <pane_id> "your prompt here"
 ```
 
-## Focus a pane (without typing)
+Without pressing enter:
+```bash
+bb wezterm send <pane_id> "partial" --no-enter
+```
+
+## Focus a Pane
 
 ```bash
 bb wezterm focus <pane_id>
 ```
 
-## Examples
+## Find Pi Agent Panes
 
-### Send a prompt to pane 0
 ```bash
-bb wezterm send 0 "list all files in the current directory"
+bb wezterm list | jq -r '.data[] | select(.title | contains("π")) | {pane_id, title, cwd}'
 ```
 
-### Check pane layout
-```bash
-bb wezterm list | jq '.data[] | {pane_id, title, cwd}'
-```
+## Broadcast to All Pi Agents
 
-### Send to all Pi panes
 ```bash
 for id in $(bb wezterm list | jq -r '.data[] | select(.title | contains("π")) | .pane_id'); do
-  bb wezterm send $id "check for errors"
+  echo "Sending to pane $id..."
+  bb wezterm send $id "check for compilation errors and fix them"
+  sleep 2
 done
+```
+
+## Common Workflows
+
+### Parallel task assignment
+```bash
+bb wezterm send 0 "implement the backend API for user auth"
+bb wezterm send 1 "create the frontend login form"
+```
+
+### Sequential with dependency
+```bash
+bb wezterm send 0 "run the tests"
+# Wait for completion, then:
+bb wezterm send 1 "review the test results and fix failures"
+```
+
+### Code review pattern
+```bash
+bb wezterm send 0 "implement feature X"
+# After completion:
+bb wezterm send 3 "review the changes in the last commit, suggest improvements"
 ```
 
 ## Notes
 
-- Pane IDs are stable within a session
-- Use `bb wezterm list` to discover pane IDs
-- The `bb` binary is at `~/Documents/bigbrother/target/release/bb`
+- Pane IDs are stable within a WezTerm session
+- Always list panes first to get current IDs
+- Add `sleep 2` between broadcasts to avoid overwhelming agents
+- Use `/skill:pi-session-reader` to check agent progress

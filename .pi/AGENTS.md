@@ -1,42 +1,52 @@
-# BigBrother - Agent Orchestration
+# BigBrother - Multi-Agent Orchestration
 
-This project provides tools for orchestrating multiple Pi coding agents.
+Coordinate multiple Pi coding agents running in WezTerm panes.
 
-## Quick Commands
+## Quick Reference
 
-### List all terminal panes
 ```bash
-bb wezterm list
-```
+# List all panes
+bb wezterm list | jq -r '.data[] | "\(.pane_id): \(.title)"'
 
-### Send to a specific pane
-```bash
+# Send to a pane
 bb wezterm send <pane_id> "your prompt"
+
+# Check if agent is idle
+SESSION=$(ls -t ~/.pi/agent/sessions/--Users-louisbeaumont-Documents-<project>--/*.jsonl | head -1)
+tail -1 "$SESSION" | jq '.message.stopReason'  # "stop" = idle
 ```
 
-### Focus a pane
+## Skills
+
+- `/skill:wezterm-orchestrator` - Pane control commands
+- `/skill:pi-session-reader` - Monitor agent sessions
+
+## Typical Pane Layout
+
+```
+┌─────────────────┬─────────────────┐
+│ Pane 0          │ Pane 3          │
+│ π screenpipe    │ π screenpipe    │
+│ (backend)       │ (backend 2)     │
+├─────────────────┼─────────────────┤
+│ Pane 1          │ Pane 2/4        │
+│ bun (frontend)  │ π brain         │
+│                 │ (orchestrator)  │
+└─────────────────┴─────────────────┘
+```
+
+Run `bb wezterm list` for current layout.
+
+## Workflow
+
+1. `bb wezterm list` - discover panes
+2. Check agent status via session files
+3. `bb wezterm send <id> "task"` - delegate
+4. Monitor progress
+5. Repeat
+
+## Build bb
+
 ```bash
-bb wezterm focus <pane_id>
+cd ~/Documents/bigbrother && cargo build --release -p bb
 ```
-
-## Available Skills
-
-- `wezterm-orchestrator` - Control WezTerm panes via `bb wezterm` commands
-- `pi-session-reader` - Read Pi session files to understand agent state
-
-## When to Orchestrate
-
-Use orchestration when:
-- Task spans multiple projects/repos
-- Need parallel work across codebases
-- Want to coordinate frontend + backend changes
-- Need to review work done by another agent
-
-## Building bb
-
-```bash
-cd ~/Documents/bigbrother
-cargo build --release -p bb
-```
-
-Binary: `./target/release/bb`
