@@ -79,3 +79,4 @@ bb wezterm send 3 "review the changes in the last commit, suggest improvements"
 - Always list panes first to get current IDs
 - Add `sleep 2` between broadcasts to avoid overwhelming agents
 - Use `/skill:pi-session-reader` to check agent progress
+- **If commands fail**: User may be in another app. Wait for them to return to WezTerm, or use `/skill:agent-monitor` which can check sessions without WezTerm access
