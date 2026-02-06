@@ -34,19 +34,15 @@ pub fn init_com() -> Result<()> {
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
     unsafe {
-        match CoInitializeEx(None, COINIT_MULTITHREADED) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                // S_FALSE means already initialized, which is fine
-                if e.code().0 as u32 == 0x00000001 {
-                    Ok(())
-                } else {
-                    Err(Error::new(
-                        ErrorCode::Unknown,
-                        format!("Failed to initialize COM: {:?}", e),
-                    ))
-                }
-            }
+        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        // S_OK (0) and S_FALSE (1 = already initialized) are both fine
+        if hr.0 == 0 || hr.0 == 1 {
+            Ok(())
+        } else {
+            Err(Error::new(
+                ErrorCode::Unknown,
+                format!("Failed to initialize COM: HRESULT 0x{:08X}", hr.0),
+            ))
         }
     }
 }

@@ -13,13 +13,12 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
     PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
-use windows::Win32::Foundation::HWND;
 
 /// Get the currently focused window title
 pub fn get_focused_window_title() -> Option<String> {
     unsafe {
         let hwnd = GetForegroundWindow();
-        if hwnd.0 == 0 {
+        if hwnd.0.is_null() {
             return None;
         }
 
@@ -37,7 +36,7 @@ pub fn get_focused_window_title() -> Option<String> {
 pub fn get_focused_window_pid() -> Option<u32> {
     unsafe {
         let hwnd = GetForegroundWindow();
-        if hwnd.0 == 0 {
+        if hwnd.0.is_null() {
             return None;
         }
 

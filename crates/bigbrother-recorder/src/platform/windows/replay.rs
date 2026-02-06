@@ -51,11 +51,11 @@ impl Replayer {
                     self.move_to(*x, *y)?;
                     stats.moves += 1;
                 }
-                EventData::Scroll { x, y, dx, dy } => {
+                EventData::Scroll { x, y, dy, .. } => {
                     self.scroll(*x, *y, *dy)?;
                     stats.scrolls += 1;
                 }
-                EventData::Key { k, m } => {
+                EventData::Key { k, .. } => {
                     self.key(*k)?;
                     stats.keys += 1;
                 }

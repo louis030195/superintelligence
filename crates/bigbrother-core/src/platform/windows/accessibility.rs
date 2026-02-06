@@ -4,12 +4,9 @@
 
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTreeWalker,
-    TreeScope_Children, TreeScope_Subtree, UIA_NamePropertyId, UIA_ControlTypePropertyId,
-    UIA_BoundingRectanglePropertyId, UIA_ProcessIdPropertyId,
 };
 use windows::Win32::System::Com::CoCreateInstance;
 use windows::Win32::System::Com::CLSCTX_INPROC_SERVER;
-use windows::core::BSTR;
 
 use crate::{Error, ErrorCode, Result};
 
@@ -87,7 +84,9 @@ impl Element {
     /// Get the control type ID
     pub fn control_type(&self) -> i32 {
         unsafe {
-            self.inner.CurrentControlType().unwrap_or(0)
+            self.inner.CurrentControlType()
+                .map(|ct| ct.0)
+                .unwrap_or(0)
         }
     }
 
@@ -186,14 +185,14 @@ impl Element {
         use windows::Win32::Foundation::POINT;
 
         let mut point = POINT::default();
-        let mut got_point = false.into();
 
         unsafe {
-            if self.inner.GetClickablePoint(&mut point, &mut got_point).is_ok() && got_point.as_bool() {
-                Some((point.x, point.y))
-            } else {
-                // Fallback to center of bounding rect
-                self.bounds().map(|(x, y, w, h)| (x + w / 2, y + h / 2))
+            match self.inner.GetClickablePoint(&mut point) {
+                Ok(got_point) if got_point.as_bool() => Some((point.x, point.y)),
+                _ => {
+                    // Fallback to center of bounding rect
+                    self.bounds().map(|(x, y, w, h)| (x + w / 2, y + h / 2))
+                }
             }
         }
     }
