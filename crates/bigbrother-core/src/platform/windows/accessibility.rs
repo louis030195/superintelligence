@@ -244,20 +244,22 @@ pub fn get_windows() -> Result<Vec<Element>> {
     let walker = automation.tree_walker()?;
 
     let mut windows = Vec::new();
-    let mut child = walker.first_child(&root);
+    let mut current = walker.first_child(&root);
 
-    while let Some(element) = child {
-        if element.control_type() == 50032 {
-            // Window control type
+    while let Some(element) = current {
+        let next = walker.next_sibling(&element);
+        let ct = element.control_type();
+        // Include both Window (50032) and Pane (50033) top-level elements
+        if ct == 50032 || ct == 50033 {
             windows.push(element);
         }
-        child = walker.next_sibling(&windows.last().unwrap_or(&root));
+        current = next;
     }
 
     Ok(windows)
 }
 
-/// Find a window by name (partial match)
+/// Find a window by name (partial match), searching direct children of root
 pub fn find_window(name: &str) -> Result<Option<Element>> {
     let automation = Automation::new()?;
     let root = automation.root()?;
@@ -266,6 +268,7 @@ pub fn find_window(name: &str) -> Result<Option<Element>> {
     let name_lower = name.to_lowercase();
     let mut child = walker.first_child(&root);
 
+    // First pass: check direct children by name
     while let Some(element) = child {
         if let Some(window_name) = element.name() {
             if window_name.to_lowercase().contains(&name_lower) {
@@ -275,5 +278,62 @@ pub fn find_window(name: &str) -> Result<Option<Element>> {
         child = walker.next_sibling(&element);
     }
 
+    // Second pass: check by process name (handles Tauri/Electron apps where
+    // window title differs from process name, e.g. "screenpi.pe-siw")
+    let target_pid = find_pid_by_process_name(name);
+    if let Some(pid) = target_pid {
+        let mut child = walker.first_child(&root);
+        while let Some(element) = child {
+            if element.process_id() == pid as i32 {
+                return Ok(Some(element));
+            }
+            // Also check immediate children (some apps nest their main window)
+            if let Some(grandchild) = walker.first_child(&element) {
+                let mut gc = Some(grandchild);
+                while let Some(g) = gc {
+                    if g.process_id() == pid as i32 {
+                        return Ok(Some(g));
+                    }
+                    gc = walker.next_sibling(&g);
+                }
+            }
+            child = walker.next_sibling(&element);
+        }
+    }
+
     Ok(None)
+}
+
+/// Find a PID by process name (case-insensitive partial match)
+fn find_pid_by_process_name(name: &str) -> Option<u32> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
+        PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    };
+
+    let name_lower = name.to_lowercase().replace('-', "");
+
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let proc_name = String::from_utf16_lossy(
+                    &entry.szExeFile[..entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len())]
+                );
+                let proc_lower = proc_name.to_lowercase().replace('-', "").replace(".exe", "");
+                if proc_lower.contains(&name_lower) || name_lower.contains(&proc_lower) {
+                    return Some(entry.th32ProcessID);
+                }
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    None
 }
