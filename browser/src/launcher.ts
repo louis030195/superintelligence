@@ -16,6 +16,10 @@ export interface LaunchOptions {
   domains?: string[];
   /** Custom user data dir (skip profile discovery) */
   userDataDir?: string;
+  /** Use persistent context for reliable auth (like real browser sessions) */
+  persistent?: boolean;
+  /** Site name for per-site profile isolation (e.g. "linkedin", "reddit") */
+  site?: string;
 }
 
 export interface CookieStats {
@@ -26,7 +30,7 @@ export interface CookieStats {
 }
 
 export interface BrowserSession {
-  browser: Browser;
+  browser: Browser | null;
   context: BrowserContext;
   page: Page;
   profile: BrowserProfile | null;
@@ -34,14 +38,137 @@ export interface BrowserSession {
   cleanup: () => Promise<void>;
 }
 
+const PERSISTENT_PROFILE_DIR = path.join(os.homedir(), ".bb-browser-profile");
+
 /**
- * Launch a browser with cookies extracted from the user's real browser.
+ * Launch a browser session.
  *
- * Uses Playwright with the real Chrome binary (`channel: "chrome"`)
- * so it looks like a normal Chrome window — no automation flags,
- * no "Chrome is being controlled by automated test software" banner.
+ * Two modes:
+ * 1. **Persistent** (default): uses `launchPersistentContext` with a stable profile dir.
+ *    First run requires manual login; subsequent runs reuse the full session
+ *    (cookies, localStorage, IndexedDB, service workers). This is how real browsers work
+ *    and is far more reliable for sites with aggressive bot detection (LinkedIn, etc).
+ *
+ * 2. **Cookie injection** (legacy, `persistent: false`): launches a fresh context and
+ *    injects cookies extracted from another browser. Fragile — many sites detect this.
  */
 export async function launch(options: LaunchOptions): Promise<BrowserSession> {
+  const usePersistent = options.persistent !== false;
+
+  if (usePersistent) {
+    return launchPersistent(options);
+  }
+  return launchWithCookies(options);
+}
+
+async function launchPersistent(options: LaunchOptions): Promise<BrowserSession> {
+  // Per-site profile isolation: ~/.bb-browser-profiles/linkedin/, etc.
+  const profileDir = options.userDataDir
+    || (options.site
+      ? path.join(os.homedir(), ".bb-browser-profiles", options.site)
+      : PERSISTENT_PROFILE_DIR);
+  fs.mkdirSync(profileDir, { recursive: true });
+
+  // Clean stale lock file from crashed sessions
+  const lockFile = path.join(profileDir, "SingletonLock");
+  if (fs.existsSync(lockFile)) {
+    fs.unlinkSync(lockFile);
+  }
+
+  const context = await chromium.launchPersistentContext(profileDir, {
+    headless: options.headless,
+    channel: "chrome",
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--no-first-run",
+      "--no-default-browser-check",
+    ],
+    viewport: { width: 1440, height: 900 },
+    locale: Intl.DateTimeFormat().resolvedOptions().locale,
+    timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+
+  // Remove webdriver flag
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", {
+      get: () => false,
+    });
+  });
+
+  // Seed cookies from real browser into persistent profile
+  // This makes first launch work without manual login
+  const cookieStats: CookieStats = { total: 0, injected: 0, skipped: 0, errors: [] };
+  const profile = findProfile(options.browser);
+
+  if (profile) {
+    const domains = options.domains;
+    let cookies: Awaited<ReturnType<typeof extractCookies>>;
+    try {
+      cookies = extractCookies(
+        profile.cookiesPath,
+        profile.browser,
+        domains ? domains[0] : undefined
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      cookieStats.errors.push(`Cookie extraction failed: ${msg}`);
+      process.stderr.write(`warning: cookie extraction failed: ${msg}\n`);
+      cookies = [];
+    }
+
+    cookieStats.total = cookies.length;
+
+    if (cookies.length > 0) {
+      const batchSize = 50;
+      for (let i = 0; i < cookies.length; i += batchSize) {
+        const batch = cookies.slice(i, i + batchSize);
+        try {
+          await context.addCookies(batch);
+          cookieStats.injected += batch.length;
+        } catch {
+          for (const cookie of batch) {
+            try {
+              await context.addCookies([cookie]);
+              cookieStats.injected++;
+            } catch (err) {
+              cookieStats.skipped++;
+              if (cookieStats.errors.length < 5) {
+                cookieStats.errors.push(
+                  `${cookie.domain}/${cookie.name}: ${err instanceof Error ? err.message : String(err)}`
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (cookieStats.injected > 0) {
+      process.stderr.write(
+        `seeded ${cookieStats.injected}/${cookieStats.total} cookies from ${options.browser}\n`
+      );
+    }
+  }
+
+  const page = context.pages()[0] ?? (await context.newPage());
+
+  if (options.url) {
+    await page.goto(options.url, { waitUntil: "domcontentloaded" });
+  }
+
+  return {
+    browser: null,
+    context,
+    page,
+    profile,
+    cookieStats,
+    cleanup: async () => {
+      await context.close();
+    },
+  };
+}
+
+async function launchWithCookies(options: LaunchOptions): Promise<BrowserSession> {
   const profile = options.userDataDir
     ? null
     : findProfile(options.browser);

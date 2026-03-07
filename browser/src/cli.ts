@@ -17,6 +17,8 @@ async function main() {
   switch (command) {
     case "launch":
       return cmdLaunch(args.slice(1));
+    case "scrape":
+      return cmdScrape(args.slice(1));
     case "profiles":
       return cmdProfiles();
     case "cookies":
@@ -32,22 +34,36 @@ function printUsage() {
   console.log(`bb-browser - Browser automation with real auth
 
 Commands:
-  launch    Launch browser with cookies from your real browser
+  launch    Launch browser (persistent session by default)
+  scrape    Scrape a URL headless (no window popup)
   profiles  List discovered browser profiles
   cookies   Show extracted cookies (for debugging)
 
 Launch options:
-  --browser <name>   Browser to use: chrome, arc, brave, edge (default: chrome)
+  --browser <name>   Browser for cookie fallback (default: chrome)
   --headless         Run in background (no visible window)
   --url <url>        Navigate to URL after launch
   --domain <domain>  Only extract cookies for this domain
   --server           Start JSON-RPC server mode (stdin/stdout)
+  --no-persistent    Use cookie injection instead of persistent profile
+
+Scrape options:
+  --url <url>        URL to scrape (required)
+  --browser <name>   Browser for cookie fallback (default: chrome)
+  --wait <ms>        Wait ms after page load (default: 2000)
+  --html             Return full HTML instead of text
+  --no-persistent    Use cookie injection instead of persistent profile
+
+Auth:
+  First run opens a visible browser for manual login.
+  After that, sessions persist across runs (headless works).
+  Profile stored in ~/.bb-browser-profile
 
 Examples:
-  bb-browser launch --browser chrome --url https://github.com
-  bb-browser launch --browser arc --headless --server
-  bb-browser profiles
-  bb-browser cookies --browser chrome --domain github.com`);
+  bb web launch --url https://linkedin.com/feed   # first run: log in manually
+  bb web scrape https://linkedin.com/feed         # headless, uses saved session
+  bb web launch --headless --server               # JSON-RPC mode
+  bb web scrape https://github.com --no-persistent  # legacy cookie injection`);
 }
 
 async function cmdLaunch(args: string[]) {
@@ -56,15 +72,19 @@ async function cmdLaunch(args: string[]) {
   const url = getFlag(args, "--url");
   const domain = getFlag(args, "--domain");
   const serverMode = args.includes("--server");
+  const persistent = !args.includes("--no-persistent");
+  const site = getFlag(args, "--site") || undefined;
 
   const session = await launch({
     browser,
     headless,
     url: url || undefined,
     domains: domain ? [domain] : undefined,
+    persistent,
+    site,
   });
 
-  const profileName = session.profile?.name || "custom";
+  const profileName = session.profile?.name || site || (persistent ? "persistent" : "custom");
   const { cookieStats } = session;
 
   if (serverMode) {
@@ -114,6 +134,61 @@ async function cmdLaunch(args: string[]) {
       process.exit(0);
     });
     await new Promise(() => {});
+  }
+}
+
+async function cmdScrape(args: string[]) {
+  const url = getFlag(args, "--url");
+  if (!url) {
+    console.error("Error: --url is required");
+    process.exit(1);
+  }
+
+  const browser = getFlag(args, "--browser") || "chrome";
+  const waitMs = parseInt(getFlag(args, "--wait") || "2000", 10);
+  const html = args.includes("--html");
+  const persistent = !args.includes("--no-persistent");
+  const site = getFlag(args, "--site") || undefined;
+
+  const session = await launch({
+    browser,
+    headless: true,
+    url,
+    persistent,
+    site,
+  });
+
+  try {
+    // wait for dynamic content to load
+    if (waitMs > 0) {
+      await session.page.waitForTimeout(waitMs);
+    }
+
+    let content: string;
+    if (html) {
+      content = await session.page.content();
+    } else {
+      content = await session.page.evaluate(() => {
+        // remove script/style/nav/header/footer noise
+        const remove = document.querySelectorAll("script, style, noscript, svg, img, link, meta");
+        remove.forEach((el) => el.remove());
+        return document.body?.innerText || "";
+      });
+    }
+
+    console.log(
+      JSON.stringify(
+        {
+          url: session.page.url(),
+          title: await session.page.title(),
+          content,
+        },
+        null,
+        2
+      )
+    );
+  } finally {
+    await session.cleanup();
   }
 }
 

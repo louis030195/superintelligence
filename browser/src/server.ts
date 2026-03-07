@@ -74,18 +74,62 @@ async function handleMethod(
     }
 
     case "click": {
-      const selector = requireParam<string>(params, "selector");
-      await page.click(selector, {
-        timeout: (params.timeout as number) || 5000,
-      });
-      return { clicked: selector };
+      const selector = params.selector as string | undefined;
+      const role = params.role as string | undefined;
+      const name = params.name as string | undefined;
+      const timeout = (params.timeout as number) || 5000;
+
+      if (role) {
+        // Aria role-based click (what brain agents use)
+        const opts: Record<string, unknown> = {};
+        if (name) opts.name = new RegExp(name, "i");
+        const el = page.getByRole(role as any, opts).first();
+        await el.scrollIntoViewIfNeeded();
+        await el.click({ timeout });
+        return { clicked: { role, name } };
+      }
+
+      if (selector) {
+        await page.click(selector, { timeout });
+        return { clicked: selector };
+      }
+
+      throw new Error("Provide 'selector' or 'role' (+optional 'name')");
     }
 
     case "type": {
-      const selector = requireParam<string>(params, "selector");
       const text = requireParam<string>(params, "text");
-      await page.fill(selector, text);
-      return { typed: text, selector };
+      const selector = params.selector as string | undefined;
+      const role = params.role as string | undefined;
+      const name = params.name as string | undefined;
+      const humanlike = params.humanlike as boolean | undefined;
+
+      if (role) {
+        const opts: Record<string, unknown> = {};
+        if (name) opts.name = new RegExp(name, "i");
+        const el = page.getByRole(role as any, opts).first();
+        await el.scrollIntoViewIfNeeded();
+        await el.click();
+        if (humanlike) {
+          await page.keyboard.type(text, { delay: 30 + Math.random() * 50 });
+        } else {
+          await el.fill(text);
+        }
+        return { typed: text, target: { role, name } };
+      }
+
+      if (selector) {
+        await page.fill(selector, text);
+        return { typed: text, selector };
+      }
+
+      // No target — type into currently focused element
+      if (humanlike) {
+        await page.keyboard.type(text, { delay: 30 + Math.random() * 50 });
+      } else {
+        await page.keyboard.insertText(text);
+      }
+      return { typed: text, target: "focused" };
     }
 
     case "press": {
@@ -117,13 +161,82 @@ async function handleMethod(
       return { html: await page.content() };
     }
 
+    // Extract visible text (same as bb web scrape)
+    case "text": {
+      const text = await page.evaluate(() => {
+        const remove = document.querySelectorAll("script, style, noscript, svg, img, link, meta");
+        remove.forEach((el) => el.remove());
+        return document.body?.innerText || "";
+      });
+      return { text, url: page.url() };
+    }
+
+    // Aria snapshot — structured page representation for AI agents
+    // This is the key method from brain agents
+    case "snapshot": {
+      const selector = (params.selector as string) || "body";
+      const timeout = (params.timeout as number) || 10000;
+      const locator = page.locator(selector);
+      const snapshot = await locator.ariaSnapshot({ timeout });
+      return { snapshot, url: page.url() };
+    }
+
+    // Find elements by aria role (getByRole equivalent)
+    case "find": {
+      const role = requireParam<string>(params, "role");
+      const name = params.name as string | undefined;
+      const opts: Record<string, unknown> = {};
+      if (name) opts.name = new RegExp(name, "i");
+
+      const elements = await page.getByRole(role as any, opts).all();
+      const results = [];
+      for (let i = 0; i < Math.min(elements.length, 50); i++) {
+        const el = elements[i];
+        const text = await el.textContent().catch(() => "") ?? "";
+        const label = await el.getAttribute("aria-label").catch(() => "") ?? "";
+        const href = await el.getAttribute("href").catch(() => "") ?? "";
+        const visible = await el.isVisible().catch(() => false);
+        if (!visible) continue;
+        results.push({
+          index: i,
+          text: text.trim().slice(0, 200),
+          label,
+          href,
+        });
+      }
+      return { role, name, count: results.length, elements: results };
+    }
+
+    // Find by placeholder text
+    case "find_placeholder": {
+      const text = requireParam<string>(params, "text");
+      const elements = await page.getByPlaceholder(new RegExp(text, "i")).all();
+      const results = [];
+      for (const el of elements) {
+        const ph = await el.getAttribute("placeholder").catch(() => "") ?? "";
+        const visible = await el.isVisible().catch(() => false);
+        results.push({ placeholder: ph, visible });
+      }
+      return { count: results.length, elements: results };
+    }
+
     case "url": {
       return { url: page.url(), title: await page.title() };
     }
 
     case "wait": {
       const selector = params.selector as string | undefined;
+      const role = params.role as string | undefined;
+      const name = params.name as string | undefined;
       const timeout = (params.timeout as number) || 5000;
+
+      if (role) {
+        const opts: Record<string, unknown> = {};
+        if (name) opts.name = new RegExp(name, "i");
+        await page.getByRole(role as any, opts).first().waitFor({ timeout });
+        return { found: { role, name } };
+      }
+
       if (selector) {
         await page.waitForSelector(selector, { timeout });
         return { found: selector };
@@ -152,7 +265,7 @@ async function handleMethod(
     }
 
     default:
-      throw new Error(`Unknown method: ${method}`);
+      throw new Error(`Unknown method: ${method}. Available: navigate, click, type, press, screenshot, evaluate, content, text, snapshot, find, find_placeholder, url, wait, scroll, cookies, close`);
   }
 }
 

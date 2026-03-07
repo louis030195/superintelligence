@@ -122,6 +122,9 @@ enum Commands {
     /// Open a URL
     Open {
         url: String,
+        /// Open in background without focusing the browser window
+        #[arg(long)]
+        background: bool,
     },
     /// Wait for idle or element
     Wait {
@@ -180,9 +183,9 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum WebAction {
-    /// Launch browser with cookies from your real browser
+    /// Launch browser (persistent session by default, first run needs manual login)
     Launch {
-        /// Browser to steal cookies from: chrome, arc, brave, edge
+        /// Browser for cookie fallback: chrome, arc, brave, edge
         #[arg(long, default_value = "chrome")]
         browser: String,
         /// Run in background (headless)
@@ -197,6 +200,12 @@ enum WebAction {
         /// Start JSON-RPC server mode (stdin/stdout)
         #[arg(long)]
         server: bool,
+        /// Use cookie injection instead of persistent profile
+        #[arg(long)]
+        no_persistent: bool,
+        /// Per-site profile isolation (e.g. "linkedin", "reddit")
+        #[arg(long)]
+        site: Option<String>,
     },
     /// List discovered browser profiles
     Profiles,
@@ -206,6 +215,26 @@ enum WebAction {
         browser: String,
         #[arg(long)]
         domain: Option<String>,
+    },
+    /// Scrape a URL headless (no window popup, persistent session)
+    Scrape {
+        /// URL to scrape
+        url: String,
+        /// Browser for cookie fallback: chrome, arc, brave, edge
+        #[arg(long, default_value = "chrome")]
+        browser: String,
+        /// Wait ms after page load before scraping
+        #[arg(long, default_value = "2000")]
+        wait: u64,
+        /// Extract full HTML instead of text
+        #[arg(long)]
+        html: bool,
+        /// Use cookie injection instead of persistent profile
+        #[arg(long)]
+        no_persistent: bool,
+        /// Per-site profile isolation (e.g. "linkedin", "reddit")
+        #[arg(long)]
+        site: Option<String>,
     },
 }
 
@@ -472,7 +501,7 @@ fn main() {
         Commands::Type { text, selector, app } => run_automation(move || cmd_type(&text, selector.as_deref(), app.as_deref())),
         Commands::Scroll { direction, pages, app } => run_automation(move || cmd_scroll(&direction, pages, app.as_deref())),
         Commands::Press { key, repeat, delay } => run_automation(move || cmd_press(&key, repeat, delay)),
-        Commands::Open { url } => run_automation(move || cmd_open(&url)),
+        Commands::Open { url, background } => run_automation(move || cmd_open(&url, background)),
         Commands::Wait { idle, selector, app, timeout } => run_automation(move || cmd_wait(idle, selector.as_deref(), app.as_deref(), timeout)),
         Commands::Screenshot { output } => run_automation(move || cmd_screenshot(&output)),
         Commands::Scrape { app, depth } => run_automation(move || cmd_scrape(&app, depth)),
@@ -604,10 +633,37 @@ fn cmd_press(key: &str, repeat: u32, delay: u64) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn cmd_open(url: &str) -> Result<()> {
-    let desktop = Desktop::new()?;
-    desktop.open_url(url)?;
-    print_json(&Output::ok(serde_json::json!({"opened": url})));
+fn cmd_open(url: &str, background: bool) -> Result<()> {
+    if background {
+        // Save the currently focused app, open URL, then re-focus the original app
+        let save_focus = std::process::Command::new("osascript")
+            .args(["-e", r#"tell application "System Events" to get name of first application process whose frontmost is true"#])
+            .output()
+            .ok()
+            .and_then(|o| if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            });
+
+        std::process::Command::new("open")
+            .arg("-g")
+            .arg(url)
+            .output()
+            .map_err(|e| anyhow::anyhow!("Failed to open URL: {}", e))?;
+
+        // Re-focus the original app so user sees no change
+        if let Some(app) = save_focus {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let _ = std::process::Command::new("osascript")
+                .args(["-e", &format!(r#"tell application "{}" to activate"#, app)])
+                .output();
+        }
+    } else {
+        let desktop = Desktop::new()?;
+        desktop.open_url(url)?;
+    }
+    print_json(&Output::ok(serde_json::json!({"opened": url, "background": background})));
     Ok(())
 }
 
@@ -819,11 +875,11 @@ fn cmd_press(key: &str, repeat: u32, delay: u64) -> Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn cmd_open(url: &str) -> Result<()> {
+fn cmd_open(url: &str, background: bool) -> Result<()> {
     std::process::Command::new("cmd")
         .args(["/c", "start", url])
         .spawn()?;
-    print_json(&Output::ok(serde_json::json!({"opened": url})));
+    print_json(&Output::ok(serde_json::json!({"opened": url, "background": background})));
     Ok(())
 }
 
@@ -992,7 +1048,7 @@ fn cmd_web(action: WebAction) -> Result<()> {
     let mut args: Vec<String> = Vec::new();
 
     match action {
-        WebAction::Launch { browser, headless, url, domain, server } => {
+        WebAction::Launch { browser, headless, url, domain, server, no_persistent, site } => {
             args.push("launch".into());
             args.push("--browser".into());
             args.push(browser);
@@ -1000,6 +1056,8 @@ fn cmd_web(action: WebAction) -> Result<()> {
             if let Some(u) = url { args.push("--url".into()); args.push(u); }
             if let Some(d) = domain { args.push("--domain".into()); args.push(d); }
             if server { args.push("--server".into()); }
+            if no_persistent { args.push("--no-persistent".into()); }
+            if let Some(s) = site { args.push("--site".into()); args.push(s); }
         }
         WebAction::Profiles => {
             args.push("profiles".into());
@@ -1009,6 +1067,18 @@ fn cmd_web(action: WebAction) -> Result<()> {
             args.push("--browser".into());
             args.push(browser);
             if let Some(d) = domain { args.push("--domain".into()); args.push(d); }
+        }
+        WebAction::Scrape { url, browser, wait, html, no_persistent, site } => {
+            args.push("scrape".into());
+            args.push("--url".into());
+            args.push(url);
+            args.push("--browser".into());
+            args.push(browser);
+            args.push("--wait".into());
+            args.push(wait.to_string());
+            if html { args.push("--html".into()); }
+            if no_persistent { args.push("--no-persistent".into()); }
+            if let Some(s) = site { args.push("--site".into()); args.push(s); }
         }
     }
 
