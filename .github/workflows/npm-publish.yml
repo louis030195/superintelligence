@@ -1,0 +1,121 @@
+name: Build and Publish npm packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            npm-pkg: bb-darwin-arm64
+            binary: bb
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            npm-pkg: bb-darwin-x64
+            binary: bb
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            npm-pkg: bb-linux-x64-gnu
+            binary: bb
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            npm-pkg: bb-win32-x64-msvc
+            binary: bb.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev libxdo-dev
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} -p bb
+
+      - name: Create npm package directory
+        shell: bash
+        run: |
+          mkdir -p npm/${{ matrix.npm-pkg }}/bin
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} npm/${{ matrix.npm-pkg }}/bin/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.npm-pkg }}
+          path: npm/${{ matrix.npm-pkg }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare platform packages
+        run: |
+          for pkg in bb-darwin-arm64 bb-darwin-x64 bb-linux-x64-gnu bb-win32-x64-msvc; do
+            cp -r artifacts/$pkg/bin npm/$pkg/
+            chmod +x npm/$pkg/bin/* 2>/dev/null || true
+          done
+
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          for pkg in bb bb-darwin-arm64 bb-darwin-x64 bb-linux-x64-gnu bb-win32-x64-msvc; do
+            cd npm/$pkg
+            npm version "$VERSION" --no-git-tag-version --allow-same-version
+            cd ../..
+          done
+          # Also update optionalDependencies versions in main package
+          cd npm/bb
+          node -e "
+            const pkg = require('./package.json');
+            for (const dep of Object.keys(pkg.optionalDependencies)) {
+              pkg.optionalDependencies[dep] = '$VERSION';
+            }
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Publish platform packages
+        run: |
+          for pkg in bb-darwin-arm64 bb-darwin-x64 bb-linux-x64-gnu bb-win32-x64-msvc; do
+            cd npm/$pkg
+            npm publish --access public || true
+            cd ../..
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish main package
+        run: |
+          cd npm/bb
+          npm publish --access public || true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

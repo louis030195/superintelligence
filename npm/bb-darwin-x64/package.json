@@ -1,0 +1,13 @@
+{
+  "name": "bbctl-darwin-x64",
+  "version": "0.1.0",
+  "description": "BigBrother CLI binary for macOS x64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/louis030195/bigbrother"
+  },
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "files": ["bin/bb"]
+}

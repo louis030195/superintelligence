@@ -1,0 +1,26 @@
+{
+  "name": "bbctl",
+  "version": "0.1.0",
+  "description": "BigBrother CLI - Desktop automation and workflow recording",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/louis030195/bigbrother"
+  },
+  "bin": {
+    "bb": "bin/bb"
+  },
+  "files": [
+    "bin",
+    "install.js"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "optionalDependencies": {
+    "bbctl-darwin-arm64": "0.1.0",
+    "bbctl-darwin-x64": "0.1.0",
+    "bbctl-linux-x64-gnu": "0.1.0",
+    "bbctl-win32-x64-msvc": "0.1.0"
+  }
+}

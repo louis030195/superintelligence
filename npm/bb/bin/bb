@@ -1,0 +1,59 @@
+#!/usr/bin/env node
+
+const { execFileSync } = require("child_process");
+const path = require("path");
+const fs = require("fs");
+
+const PLATFORMS = {
+  "darwin-arm64": "bbctl-darwin-arm64",
+  "darwin-x64": "bbctl-darwin-x64",
+  "linux-x64": "bbctl-linux-x64-gnu",
+  "win32-x64": "bbctl-win32-x64-msvc",
+};
+
+function getBinaryPath() {
+  const platformKey = `${process.platform}-${process.arch}`;
+  const pkg = PLATFORMS[platformKey];
+
+  if (!pkg) {
+    throw new Error(
+      `Unsupported platform: ${platformKey}. Supported: ${Object.keys(PLATFORMS).join(", ")}`
+    );
+  }
+
+  try {
+    const pkgPath = require.resolve(`${pkg}/package.json`);
+    const dir = path.dirname(pkgPath);
+    const binName = process.platform === "win32" ? "bb.exe" : "bb";
+    const binPath = path.join(dir, "bin", binName);
+
+    if (fs.existsSync(binPath)) {
+      return binPath;
+    }
+  } catch (e) {
+    // Package not installed, try postinstall fallback
+  }
+
+  // Fallback: check if installed via postinstall script
+  const binName = process.platform === "win32" ? "bb.exe" : "bb";
+  const fallback = path.join(__dirname, binName === "bb.exe" ? "bb.exe" : "bb-native");
+  if (fs.existsSync(fallback)) {
+    return fallback;
+  }
+
+  throw new Error(
+    `Could not find the bb binary for ${platformKey}. Make sure the optional dependency ${pkg} is installed.`
+  );
+}
+
+const binary = getBinaryPath();
+const result = require("child_process").spawnSync(binary, process.argv.slice(2), {
+  stdio: "inherit",
+  env: process.env,
+});
+
+if (result.error) {
+  throw result.error;
+}
+
+process.exit(result.status ?? 1);

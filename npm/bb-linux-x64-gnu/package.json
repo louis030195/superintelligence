@@ -1,0 +1,13 @@
+{
+  "name": "bbctl-linux-x64-gnu",
+  "version": "0.1.0",
+  "description": "BigBrother CLI binary for Linux x64 (glibc)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/louis030195/bigbrother"
+  },
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["bin/bb"]
+}

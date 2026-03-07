@@ -1,3 +1,4 @@
 /target
 *.csv
 Cargo.lock
+npm/bb-*/bin/

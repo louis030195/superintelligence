@@ -1,0 +1,13 @@
+{
+  "name": "bbctl-win32-x64-msvc",
+  "version": "0.1.0",
+  "description": "BigBrother CLI binary for Windows x64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/louis030195/bigbrother"
+  },
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": ["bin/bb.exe"]
+}
