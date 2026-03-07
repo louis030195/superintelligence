@@ -1,4 +1,2 @@
-mostly an accessibility-centric computer use hack to test my product or automate my stuff
 
-not production ready :) 
-
+a CLI to print dollars while you sleep
