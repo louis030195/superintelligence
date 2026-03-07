@@ -28,9 +28,15 @@ describe("launcher", () => {
       const url = session.page.url();
       assert.ok(url.includes("example.com"), "should be on example.com");
 
-      // Verify cookies were injected
+      // Verify cookies were injected and stats are reported
       const cookies = await session.context.cookies();
       assert.ok(cookies.length > 0, "should have cookies in context");
+
+      assert.ok(session.cookieStats, "should have cookieStats");
+      assert.ok(session.cookieStats.total > 0, "should report total cookies");
+      assert.ok(session.cookieStats.injected > 0, "should report injected count");
+      assert.ok(typeof session.cookieStats.skipped === "number", "should report skipped count");
+      assert.ok(Array.isArray(session.cookieStats.errors), "should have errors array");
     } finally {
       await session.cleanup();
     }

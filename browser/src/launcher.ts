@@ -18,11 +18,19 @@ export interface LaunchOptions {
   userDataDir?: string;
 }
 
+export interface CookieStats {
+  total: number;
+  injected: number;
+  skipped: number;
+  errors: string[];
+}
+
 export interface BrowserSession {
   browser: Browser;
   context: BrowserContext;
   page: Page;
   profile: BrowserProfile | null;
+  cookieStats: CookieStats;
   cleanup: () => Promise<void>;
 }
 
@@ -68,32 +76,55 @@ export async function launch(options: LaunchOptions): Promise<BrowserSession> {
   });
 
   // Inject cookies from real browser
+  const cookieStats: CookieStats = { total: 0, injected: 0, skipped: 0, errors: [] };
+
   if (profile) {
     const domains = options.domains;
-    const cookies = extractCookies(
-      profile.cookiesPath,
-      profile.browser,
-      domains ? domains[0] : undefined
-    );
+    let cookies: Awaited<ReturnType<typeof extractCookies>>;
+    try {
+      cookies = extractCookies(
+        profile.cookiesPath,
+        profile.browser,
+        domains ? domains[0] : undefined
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      cookieStats.errors.push(`Cookie extraction failed: ${msg}`);
+      process.stderr.write(`warning: cookie extraction failed: ${msg}\n`);
+      cookies = [];
+    }
+
+    cookieStats.total = cookies.length;
 
     if (cookies.length > 0) {
-      // Add cookies in batches, skipping any that Playwright rejects
       const batchSize = 50;
       for (let i = 0; i < cookies.length; i += batchSize) {
         const batch = cookies.slice(i, i + batchSize);
         try {
           await context.addCookies(batch);
+          cookieStats.injected += batch.length;
         } catch {
-          // Fall back to adding one by one, skipping failures
           for (const cookie of batch) {
             try {
               await context.addCookies([cookie]);
-            } catch {
-              // Skip invalid cookie silently
+              cookieStats.injected++;
+            } catch (err) {
+              cookieStats.skipped++;
+              if (cookieStats.errors.length < 5) {
+                cookieStats.errors.push(
+                  `${cookie.domain}/${cookie.name}: ${err instanceof Error ? err.message : String(err)}`
+                );
+              }
             }
           }
         }
       }
+    }
+
+    if (cookieStats.skipped > 0) {
+      process.stderr.write(
+        `warning: injected ${cookieStats.injected}/${cookieStats.total} cookies, ${cookieStats.skipped} skipped\n`
+      );
     }
   }
 
@@ -115,6 +146,7 @@ export async function launch(options: LaunchOptions): Promise<BrowserSession> {
     context,
     page,
     profile,
+    cookieStats,
     cleanup: async () => {
       await context.close();
       await browser.close();

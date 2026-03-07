@@ -65,26 +65,35 @@ async function cmdLaunch(args: string[]) {
   });
 
   const profileName = session.profile?.name || "custom";
-  const cookieCount = (await session.context.cookies()).length;
+  const { cookieStats } = session;
 
   if (serverMode) {
-    // In server mode, emit ready signal then listen for commands
     process.stdout.write(
       JSON.stringify({
         ready: true,
         profile: profileName,
-        cookies: cookieCount,
+        cookies: {
+          injected: cookieStats.injected,
+          total: cookieStats.total,
+          skipped: cookieStats.skipped,
+        },
         url: session.page.url(),
       }) + "\n"
     );
     await startServer(session);
   } else {
-    // Interactive mode: print info and keep browser open
     console.log(
       JSON.stringify(
         {
           profile: profileName,
-          cookies: cookieCount,
+          cookies: {
+            injected: cookieStats.injected,
+            total: cookieStats.total,
+            skipped: cookieStats.skipped,
+            ...(cookieStats.errors.length > 0
+              ? { errors: cookieStats.errors }
+              : {}),
+          },
           url: session.page.url(),
           pid: process.pid,
           hint: "Browser is running. Press Ctrl+C to close.",
@@ -162,6 +171,32 @@ function getFlag(args: string[], flag: string): string | null {
 }
 
 main().catch((err) => {
-  console.error("Error:", err.message);
+  const msg = err instanceof Error ? err.message : String(err);
+
+  // Map known errors to specific exit codes
+  if (msg.includes("profile found")) {
+    console.error(`Error: ${msg}`);
+    console.error("Available profiles:");
+    for (const p of discoverProfiles()) {
+      console.error(`  ${p.name} (${p.profileDir})`);
+    }
+    process.exit(2);
+  }
+
+  if (msg.includes("Executable doesn't exist") || msg.includes("browserType.launch")) {
+    console.error(
+      `Error: Chrome not found. Install Google Chrome or run: npx playwright install chromium`
+    );
+    process.exit(3);
+  }
+
+  if (msg.includes("Keychain") || msg.includes("security find-generic-password")) {
+    console.error(
+      `Error: Could not access keychain to decrypt cookies. You may need to allow access in the system prompt.`
+    );
+    process.exit(4);
+  }
+
+  console.error(`Error: ${msg}`);
   process.exit(1);
 });

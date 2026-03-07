@@ -1018,12 +1018,26 @@ fn cmd_web(action: WebAction) -> Result<()> {
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
-        .status()?;
+        .status();
 
-    if !status.success() {
-        std::process::exit(status.code().unwrap_or(1));
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => {
+            let code = s.code().unwrap_or(1);
+            match code {
+                2 => eprintln!("hint: run 'bb web profiles' to see available browser profiles"),
+                3 => eprintln!("hint: install Chrome or run 'npx playwright install chromium'"),
+                4 => eprintln!("hint: allow keychain access when prompted by the system"),
+                _ => {}
+            }
+            std::process::exit(code);
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("Error: 'node' not found. Install Node.js (https://nodejs.org) or Bun (https://bun.sh)");
+            std::process::exit(1);
+        }
+        Err(e) => Err(e.into()),
     }
-    Ok(())
 }
 
 fn find_browser_module() -> Option<String> {

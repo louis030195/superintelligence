@@ -31,7 +31,14 @@ export async function startServer(session: BrowserSession): Promise<void> {
     try {
       req = JSON.parse(line);
     } catch {
-      process.stderr.write("Invalid JSON\n");
+      process.stdout.write(
+        JSON.stringify({ id: null, error: { message: "Invalid JSON" } }) + "\n"
+      );
+      return;
+    }
+
+    if (!req.method) {
+      respondError(req.id ?? null, "Missing 'method' field");
       return;
     }
 
