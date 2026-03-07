@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
@@ -63,6 +64,7 @@ jobs:
 
   publish:
     needs: build
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,8 +82,12 @@ jobs:
       - name: Prepare platform packages
         run: |
           for pkg in bb-darwin-arm64 bb-darwin-x64 bb-linux-x64-gnu bb-win32-x64-msvc; do
-            cp -r artifacts/$pkg/bin npm/$pkg/
-            chmod +x npm/$pkg/bin/* 2>/dev/null || true
+            if [ -d "artifacts/$pkg/bin" ]; then
+              cp -r artifacts/$pkg/bin npm/$pkg/
+              chmod +x npm/$pkg/bin/* 2>/dev/null || true
+            else
+              echo "Skipping $pkg (not built)"
+            fi
           done
 
       - name: Set version from tag
