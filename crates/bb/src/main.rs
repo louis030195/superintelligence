@@ -66,8 +66,13 @@ enum Commands {
     // === Automation Commands ===
     /// List running applications
     Apps,
-    /// Find a browser
+    /// Find a running browser window
     Browser,
+    /// Launch automated browser with real auth
+    Web {
+        #[command(subcommand)]
+        action: WebAction,
+    },
     /// Get accessibility tree for an app
     Tree {
         #[arg(long)]
@@ -170,6 +175,37 @@ enum Commands {
     Wezterm {
         #[command(subcommand)]
         action: WeztermAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum WebAction {
+    /// Launch browser with cookies from your real browser
+    Launch {
+        /// Browser to steal cookies from: chrome, arc, brave, edge
+        #[arg(long, default_value = "chrome")]
+        browser: String,
+        /// Run in background (headless)
+        #[arg(long)]
+        headless: bool,
+        /// Navigate to this URL
+        #[arg(long)]
+        url: Option<String>,
+        /// Only extract cookies for this domain
+        #[arg(long)]
+        domain: Option<String>,
+        /// Start JSON-RPC server mode (stdin/stdout)
+        #[arg(long)]
+        server: bool,
+    },
+    /// List discovered browser profiles
+    Profiles,
+    /// Show extracted cookies (for debugging)
+    Cookies {
+        #[arg(long, default_value = "chrome")]
+        browser: String,
+        #[arg(long)]
+        domain: Option<String>,
     },
 }
 
@@ -444,6 +480,7 @@ fn main() {
         Commands::Activate { app } => run_automation(move || cmd_activate(&app)),
         Commands::ClickAt { x, y, button } => run_automation(move || cmd_click_at(x, y, &button)),
         Commands::Send { text, app, no_enter } => run_automation(move || cmd_send(&text, &app, no_enter)),
+        Commands::Web { action } => cmd_web(action),
         Commands::Wezterm { action } => cmd_wezterm(action),
     };
 
@@ -940,6 +977,90 @@ fn cmd_send(text: &str, app: &str, no_enter: bool) -> Result<()> {
     }
     print_json(&Output::ok(serde_json::json!({"sent": text, "app": app, "enter": !no_enter})));
     Ok(())
+}
+
+// ── Web (browser automation) ────────────────────────────────────────────────
+
+fn cmd_web(action: WebAction) -> Result<()> {
+    // Find bb-browser module: check relative to this binary, then node_modules
+    let browser_cli = find_browser_module().ok_or_else(|| {
+        anyhow::anyhow!(
+            "bb-browser module not found. Install it:\n  cd browser && npm install && npm run build"
+        )
+    })?;
+
+    let mut args: Vec<String> = Vec::new();
+
+    match action {
+        WebAction::Launch { browser, headless, url, domain, server } => {
+            args.push("launch".into());
+            args.push("--browser".into());
+            args.push(browser);
+            if headless { args.push("--headless".into()); }
+            if let Some(u) = url { args.push("--url".into()); args.push(u); }
+            if let Some(d) = domain { args.push("--domain".into()); args.push(d); }
+            if server { args.push("--server".into()); }
+        }
+        WebAction::Profiles => {
+            args.push("profiles".into());
+        }
+        WebAction::Cookies { browser, domain } => {
+            args.push("cookies".into());
+            args.push("--browser".into());
+            args.push(browser);
+            if let Some(d) = domain { args.push("--domain".into()); args.push(d); }
+        }
+    }
+
+    let status = std::process::Command::new("node")
+        .arg(&browser_cli)
+        .args(&args)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()?;
+
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
+    Ok(())
+}
+
+fn find_browser_module() -> Option<String> {
+    // 1. Check relative to the binary (for development)
+    if let Ok(exe) = std::env::current_exe() {
+        let repo_root = exe.parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent());
+        if let Some(root) = repo_root {
+            let dev_path = root.join("browser").join("dist").join("cli.js");
+            if dev_path.exists() {
+                return Some(dev_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // 2. Check CWD/browser/dist
+    let cwd_path = std::path::PathBuf::from("browser/dist/cli.js");
+    if cwd_path.exists() {
+        return Some(cwd_path.to_string_lossy().to_string());
+    }
+
+    // 3. Try npx resolution
+    if let Ok(output) = std::process::Command::new("node")
+        .args(["-e", "console.log(require.resolve('bb-browser'))"])
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(path);
+            }
+        }
+    }
+
+    None
 }
 
 // ── WezTerm (macOS-only for now) ────────────────────────────────────────────
