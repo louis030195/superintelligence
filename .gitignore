@@ -4,3 +4,4 @@ Cargo.lock
 npm/bb-*/bin/
 node_modules/
 browser/dist/
+web/.next/
