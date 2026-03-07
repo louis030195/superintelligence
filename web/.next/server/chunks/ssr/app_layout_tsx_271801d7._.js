@@ -1,0 +1,3 @@
+module.exports=[33290,a=>{"use strict";var b=a.i(7997);function c({children:a}){return(0,b.jsxs)("html",{lang:"en",children:[(0,b.jsx)("head",{children:(0,b.jsx)("link",{href:"https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap",rel:"stylesheet"})}),(0,b.jsx)("body",{className:"antialiased",children:a})]})}a.s(["default",()=>c,"metadata",0,{title:"bbctl - Desktop & Browser Automation for AI Agents",description:"Record, replay, and automate desktop workflows. Browser automation with real auth. One CLI, every platform.",icons:{icon:[{url:"/favicon.svg",type:"image/svg+xml"}]}}])}];
+
+//# sourceMappingURL=app_layout_tsx_271801d7._.js.map

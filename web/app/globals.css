@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+:root {
+  --parchment-50: #faf8f3;
+  --parchment-100: #f4f0e6;
+  --ink-700: #43637d;
+  --ink-800: #304c5f;
+  --ink-900: #1d3541;
+  --stone-300: #cfc9bd;
+  --stone-600: #92897b;
+  --stone-700: #756d65;
+
+  --background: #faf8f3;
+  --foreground: #000000;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+code, pre, .font-mono {
+  font-family: "IBM Plex Mono", "Menlo", "Monaco", monospace;
+}
+
+::selection {
+  background: #000;
+  color: #faf8f3;
+}
+
+::-webkit-scrollbar {
+  width: 3px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--stone-300);
+}
