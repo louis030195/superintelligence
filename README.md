@@ -1,2 +1,2 @@
 
-a CLI to print dollars while you sleep
+[a CLI to print dollars while you sleep](https://bbctl.ai)
