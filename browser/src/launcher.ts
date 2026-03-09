@@ -20,6 +20,8 @@ export interface LaunchOptions {
   persistent?: boolean;
   /** Site name for per-site profile isolation (e.g. "linkedin", "reddit") */
   site?: string;
+  /** Enable network request capture (used by session daemon) */
+  captureNetwork?: boolean;
 }
 
 export interface CookieStats {
