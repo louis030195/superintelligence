@@ -75,9 +75,19 @@ async function launchPersistent(options: LaunchOptions): Promise<BrowserSession>
     fs.unlinkSync(lockFile);
   }
 
+  // Use system Chrome if available (better stealth), fall back to Playwright Chromium
+  let channel: "chrome" | undefined = "chrome";
+  try {
+    // Quick check: can we find Chrome?
+    const testBrowser = await chromium.launch({ channel: "chrome", headless: true });
+    await testBrowser.close();
+  } catch {
+    channel = undefined; // Chrome not available, use bundled Chromium
+  }
+
   const context = await chromium.launchPersistentContext(profileDir, {
     headless: options.headless,
-    channel: "chrome",
+    ...(channel ? { channel } : {}),
     args: [
       "--disable-blink-features=AutomationControlled",
       "--no-first-run",
@@ -173,9 +183,10 @@ async function launchWithCookies(options: LaunchOptions): Promise<BrowserSession
     ? null
     : findProfile(options.browser);
 
+  // No profile is OK — just launch without cookies
   if (!profile && !options.userDataDir) {
-    throw new Error(
-      `No ${options.browser} profile found. Is ${options.browser} installed?`
+    process.stderr.write(
+      `warning: no ${options.browser} profile found, launching without cookies\n`
     );
   }
 
@@ -184,9 +195,17 @@ async function launchWithCookies(options: LaunchOptions): Promise<BrowserSession
     path.join(os.tmpdir(), "bb-browser-")
   );
 
-  // Launch with real Chrome binary for stealth
+  // Use system Chrome if available (better stealth), fall back to Playwright Chromium
+  let useChannel: "chrome" | undefined = "chrome";
+  try {
+    const testBrowser = await chromium.launch({ channel: "chrome", headless: true });
+    await testBrowser.close();
+  } catch {
+    useChannel = undefined;
+  }
+
   const browser = await chromium.launch({
-    channel: "chrome",
+    ...(useChannel ? { channel: useChannel } : {}),
     headless: options.headless,
     args: [
       "--disable-blink-features=AutomationControlled",
